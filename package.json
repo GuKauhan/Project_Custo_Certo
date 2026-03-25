@@ -14,6 +14,15 @@
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
-    "pg": "^8.20.0"
-  }
+    "pg": "^8.20.0",
+    "sqlite3": "^6.0.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GuKauhan/Project_Custo_Certo.git"
+  },
+  "bugs": {
+    "url": "https://github.com/GuKauhan/Project_Custo_Certo/issues"
+  },
+  "homepage": "https://github.com/GuKauhan/Project_Custo_Certo#readme"
 }
