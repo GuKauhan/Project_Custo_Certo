@@ -18,7 +18,18 @@ export const balancaController = {
   receberPeso(req: Request, res: Response): void {
     const { peso } = validatePesoPayload(req.body);
     balancaService.registrarLeitura(peso);
-    res.json({ ok: true });
+
+    // A resposta carrega o pedido de tara pendente. Assim o ESP32 descobre que
+    // precisa zerar sem fazer uma segunda requisição — antes ele consultava
+    // GET /balanca/tara a cada segundo, o que dobrava as idas ao servidor e
+    // atrasava o envio do peso, porque a chamada é bloqueante no firmware.
+    //
+    // ATENÇÃO — firmware e backend passam a andar juntos: verificarTara()
+    // CONSOME a flag, então quem ler primeiro fica com ela. Um ESP32 com o
+    // firmware antigo (que só faz GET /balanca/tara) nunca mais receberia a
+    // tara, porque este POST a consumiria antes. Ao publicar esta versão do
+    // backend, é obrigatório regravar o firmware.
+    res.json({ ok: true, tarar: balancaService.verificarTara() });
   },
 
   /** GET /balanca/peso — Frontend faz polling (mantido para compatibilidade) */

@@ -46,16 +46,26 @@
 // =====================================================
 // CONSTANTES DE TEMPO
 // =====================================================
-const unsigned long INTERVALO_LEITURA_MS = 200;     // envia peso 5x/s
-const unsigned long INTERVALO_TARA_MS    = 1000;    // checa tara 1x/s
+// O HX711 amostra a 10 Hz, ou seja, uma leitura fica pronta a cada ~100 ms.
+// Pedir menos que isso não adianta: o chip não teria dado novo para entregar.
+const unsigned long INTERVALO_LEITURA_MS = 100;     // envia peso ~10x/s
 const unsigned long WIFI_TIMEOUT_MS      = 20000;
+
+// Suavização por média móvel exponencial, feita aqui em software.
+// Substitui o scale.get_units(5), que travava o laço por meio segundo
+// esperando cinco amostras do chip. Com uma amostra só e este filtro, a
+// leitura fica igualmente estável e chega cinco vezes mais rápido.
+// Quanto menor o peso do filtro, mais suave e mais lento; 0.35 equilibra
+// tremor de leitura e resposta ao colocar o insumo na balança.
+const float SUAVIZACAO = 0.35f;
 
 // =====================================================
 // ESTADO GLOBAL
 // =====================================================
 HX711 scale;
 unsigned long ultimaLeitura = 0;
-unsigned long ultimaCheckTara = 0;
+float pesoSuavizado = 0.0f;
+bool primeiraLeitura = true;
 
 bool serverIsHttps() {
   return String(SERVER_URL).startsWith("https://");
@@ -91,14 +101,29 @@ void conectarWiFi() {
 // =====================================================
 // Para HTTPS sem certificado raiz embarcado, usamos setInsecure().
 // Em produção crítica recomenda-se subir a CA do Render para o ESP32.
-bool httpPost(const String& path, const String& body) {
-  HTTPClient http;
-  WiFiClientSecure clientSecure;
-  WiFiClient clientPlain;
+/**
+ * Envia um POST e devolve o corpo da resposta.
+ *
+ * O cliente e a conexão são estáticos de propósito. Antes, cada chamada criava
+ * um HTTPClient novo e abria uma conexão TCP do zero — com dez envios por
+ * segundo, isso significaria dez handshakes por segundo. Com setReuse(true) a
+ * conexão fica aberta entre as leituras, o que corta a maior parte do custo de
+ * rede de cada envio.
+ */
+String httpPost(const String& path, const String& body) {
+  static HTTPClient http;
+  static WiFiClient clientPlain;
+  static WiFiClientSecure clientSecure;
+  static bool configurado = false;
+
+  if (!configurado) {
+    clientSecure.setInsecure();
+    http.setReuse(true);
+    configurado = true;
+  }
 
   bool ok;
   if (serverIsHttps()) {
-    clientSecure.setInsecure();
     ok = http.begin(clientSecure, String(SERVER_URL) + path);
   } else {
     ok = http.begin(clientPlain, String(SERVER_URL) + path);
@@ -106,21 +131,25 @@ bool httpPost(const String& path, const String& body) {
 
   if (!ok) {
     Serial.println("❌ http.begin falhou");
-    return false;
+    return "";
   }
 
   http.addHeader("Content-Type", "application/json");
-  http.setTimeout(5000);
+  // Timeout curto: se o servidor não responder rápido, é melhor perder uma
+  // leitura do que travar o laço e atrasar todas as seguintes.
+  http.setTimeout(2000);
 
   int code = http.POST(body);
-  bool sucesso = (code >= 200 && code < 300);
+  String resposta = "";
 
-  if (!sucesso) {
+  if (code >= 200 && code < 300) {
+    resposta = http.getString();
+  } else {
     Serial.printf("⚠️  POST %s -> %d\n", path.c_str(), code);
   }
 
   http.end();
-  return sucesso;
+  return resposta;
 }
 
 String httpGet(const String& path) {
@@ -187,27 +216,33 @@ void loop() {
   unsigned long agora = millis();
 
   // ----- ENVIAR PESO -----
-  if (agora - ultimaLeitura >= INTERVALO_LEITURA_MS) {
+  // scale.is_ready() evita o ponto mais caro do laço: sem ele, get_units()
+  // fica bloqueado esperando o chip terminar a conversão. Aqui só lemos
+  // quando já existe amostra pronta, e o laço nunca trava.
+  if (agora - ultimaLeitura >= INTERVALO_LEITURA_MS && scale.is_ready()) {
     ultimaLeitura = agora;
 
-    float peso = scale.get_units(5);
-    if (peso < 0) peso = 0;
+    float bruto = scale.get_units(1);
+    if (bruto < 0) bruto = 0;
+
+    if (primeiraLeitura) {
+      pesoSuavizado = bruto;
+      primeiraLeitura = false;
+    } else {
+      pesoSuavizado = (SUAVIZACAO * bruto) + ((1.0f - SUAVIZACAO) * pesoSuavizado);
+    }
 
     char body[64];
-    snprintf(body, sizeof(body), "{\"peso\":%.3f}", peso);
-    httpPost("/balanca/peso", body);
+    snprintf(body, sizeof(body), "{\"peso\":%.3f}", pesoSuavizado);
 
-    // Log opcional (descomente para debug)
-    // Serial.printf("Peso: %.3f kg\n", peso);
-  }
-
-  // ----- CHECAR TARA -----
-  if (agora - ultimaCheckTara >= INTERVALO_TARA_MS) {
-    ultimaCheckTara = agora;
-
-    String resp = httpGet("/balanca/tara");
-    if (resp.indexOf("\"tarar\":true") >= 0) {
+    // A resposta do POST já traz o pedido de tara, o que dispensa a
+    // requisição GET separada que antes rodava a cada segundo. São
+    // metade das idas ao servidor, e a tara chega mais rápido.
+    String resposta = httpPost("/balanca/peso", body);
+    if (resposta.indexOf("\"tarar\":true") >= 0) {
       scale.tare();
+      pesoSuavizado = 0.0f;
+      primeiraLeitura = true;
       Serial.println("✅ Tara executada");
     }
   }
