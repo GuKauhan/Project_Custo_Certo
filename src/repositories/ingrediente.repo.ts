@@ -3,6 +3,10 @@
  *
  * Responsável APENAS por SQL e mapeamento snake_case <-> camelCase.
  * Sem regras de negócio — isso fica nos services.
+ *
+ * O SQL daqui roda no MySQL, nas mesmas tabelas que a aplicação desktop em Java
+ * lê e escreve. As colunas DECIMAL chegam do driver como texto, e é por isso que
+ * todo valor numérico passa por `Number(...)` antes de virar modelo.
  */
 
 import { getDb } from '../config/database.js';
@@ -27,6 +31,22 @@ function rowToIngrediente(row: Record<string, unknown>): Ingrediente {
     criadoEm: row.criado_em ? String(row.criado_em) : undefined,
     atualizadoEm: row.atualizado_em ? String(row.atualizado_em) : undefined,
   };
+}
+
+/**
+ * Data de hoje no fuso da máquina, no formato YYYY-MM-DD.
+ *
+ * `new Date().toISOString()` devolveria a data em UTC — depois das 21h no
+ * horário de Brasília isso já é o dia seguinte, e a compra registrada pelo
+ * painel web apareceria com um dia a mais. A aplicação desktop grava a data
+ * local (`LocalDate` no Java, `CURRENT_DATE` no MySQL); como as duas interfaces
+ * escrevem na mesma tabela, elas precisam concordar sobre que dia é hoje.
+ */
+function dataDeHoje(): string {
+  const agora = new Date();
+  const mes = String(agora.getMonth() + 1).padStart(2, '0');
+  const dia = String(agora.getDate()).padStart(2, '0');
+  return `${agora.getFullYear()}-${mes}-${dia}`;
 }
 
 export const ingredienteRepository = {
@@ -81,9 +101,9 @@ export const ingredienteRepository = {
   async criar(input: IngredienteInput): Promise<Ingrediente> {
     const db = getDb();
     const qtdMax = input.qtdMax ?? input.qtd;
-    const hoje = new Date().toISOString().slice(0, 10);
+    const hoje = dataDeHoje();
 
-    // libSQL aceita batch transacional
+    // batch executa os comandos dentro de uma transacao
     const results = await db.batch(
       [
         {
@@ -142,7 +162,7 @@ export const ingredienteRepository = {
     // Schema garante que há ao menos um campo; mas se nada chegou, devolve o atual.
     if (sets.length === 0) return atual;
 
-    sets.push("atualizado_em = datetime('now')");
+    sets.push("atualizado_em = NOW()");
     args.push(id);
 
     await db.execute({
@@ -165,7 +185,7 @@ export const ingredienteRepository = {
 
     const novaQtd = atual.qtd + compra.quantidade;
     const validade = compra.validade !== undefined ? compra.validade : atual.validade;
-    const hoje = new Date().toISOString().slice(0, 10);
+    const hoje = dataDeHoje();
 
     await db.batch(
       [
@@ -175,7 +195,7 @@ export const ingredienteRepository = {
                     qtd_max = ?,
                     preco = ?,
                     validade = ?,
-                    atualizado_em = datetime('now')
+                    atualizado_em = NOW()
                 WHERE id = ?`,
           args: [novaQtd, novaQtd, compra.precoUnitario, validade, id],
         },
@@ -209,13 +229,13 @@ export const ingredienteRepository = {
     if (!atual) return null;
 
     const novaQtd = Math.max(0, atual.qtd - quantidade);
-    const hoje = new Date().toISOString().slice(0, 10);
+    const hoje = dataDeHoje();
 
     await db.batch(
       [
         {
           sql: `UPDATE ingredientes
-                SET qtd = ?, atualizado_em = datetime('now')
+                SET qtd = ?, atualizado_em = NOW()
                 WHERE id = ?`,
           args: [novaQtd, id],
         },

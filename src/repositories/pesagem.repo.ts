@@ -3,7 +3,7 @@
  *
  * O estado da balança (peso atual + flag de tara) é volátil por design:
  * - Atualizado várias vezes por segundo pelo ESP32 — persistir no DB
- *   seria desperdício e geraria carga inútil em Turso.
+ *   seria desperdício e geraria carga inútil no banco.
  * - Quando o servidor reinicia, a balança zera junto. Comportamento desejado.
  *
  * Mantemos um repository mesmo assim para preservar a separação de camadas:

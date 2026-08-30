@@ -1,70 +1,90 @@
--- =====================================================
--- Custo Certo - Schema SQLite/libSQL
--- =====================================================
+-- =====================================================================
+-- Custo Certo - Schema MySQL (painel web)
+-- =====================================================================
 -- Idempotente: pode rodar repetidas vezes sem quebrar.
--- Compatível com SQLite local e Turso (libSQL).
+--
+-- ATENCAO: estas sao as MESMAS tabelas usadas pela aplicacao desktop, que
+-- vive em OUTRO REPOSITORIO (Custo-Certo/versao_3semestre). A fonte oficial
+-- da modelagem, com as restricoes comentadas uma a uma e a carga inicial, e
+-- o arquivo daquele repositorio:
+--
+--     desktop/src/main/resources/sql/02_schema_insumos.sql
+--
+-- Aquele e o script entregue na materia de Banco de Dados. Este arquivo
+-- repete apenas a parte de CREATE TABLE, para que o servidor Node consiga
+-- subir sozinho em uma maquina onde o script do desktop nunca rodou.
+-- Quem rodar primeiro cria; o segundo encontra tudo pronto e nao faz nada.
+-- Ao alterar uma tabela, altere NOS DOIS REPOSITORIOS.
+--
+-- As tabelas de acesso (usuarios e log_acesso) ficam so do lado do desktop:
+-- o painel web nao tem login.
+--
+-- As tabelas receitas e receita_ingredientes existiam no schema SQLite
+-- anterior, preparadas para uso futuro, e nunca foram usadas por nenhuma
+-- rota. Elas ficaram de fora ate o grupo fechar a decisao D5, que define
+-- o escopo do DER a ser entregue.
+-- =====================================================================
 
--- Habilita foreign keys (SQLite desliga por padrão)
-PRAGMA foreign_keys = ON;
-
--- =====================================================
--- INGREDIENTES
--- =====================================================
+-- =====================================================================
+-- TABELA: ingredientes
+-- ---------------------------------------------------------------------
 -- Estoque ativo de cada insumo da cafeteria.
--- "qtd" é o estoque atual; "qtd_max" é o pico (100% da barra).
+-- "qtd" e o estoque atual; "qtd_max" e a capacidade de referencia, que
+-- corresponde a 100% da barra de nivel exibida na interface.
+-- =====================================================================
 CREATE TABLE IF NOT EXISTS ingredientes (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    nome        TEXT    NOT NULL,
-    unidade     TEXT    NOT NULL CHECK (unidade IN ('kg', 'g', 'L', 'ml', 'un')),
-    preco       REAL    NOT NULL DEFAULT 0,
-    qtd         REAL    NOT NULL DEFAULT 0,
-    qtd_max     REAL    NOT NULL DEFAULT 0,
-    validade    TEXT,
-    criado_em   TEXT    NOT NULL DEFAULT (datetime('now')),
-    atualizado_em TEXT  NOT NULL DEFAULT (datetime('now'))
-);
+    id            INT           NOT NULL AUTO_INCREMENT,
+    nome          VARCHAR(120)  NOT NULL,
+    unidade       ENUM('kg', 'g', 'L', 'ml', 'un') NOT NULL,
+    preco         DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    qtd           DECIMAL(10,3) NOT NULL DEFAULT 0.000,
+    qtd_max       DECIMAL(10,3) NOT NULL DEFAULT 0.000,
+    validade      DATE          NULL,
+    criado_em     DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    atualizado_em DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
-CREATE INDEX IF NOT EXISTS idx_ingredientes_nome ON ingredientes(nome);
+    CONSTRAINT pk_ingredientes      PRIMARY KEY (id),
+    CONSTRAINT uk_ingredientes_nome UNIQUE (nome),
+    CONSTRAINT ck_ingredientes_preco   CHECK (preco >= 0),
+    CONSTRAINT ck_ingredientes_qtd     CHECK (qtd >= 0),
+    CONSTRAINT ck_ingredientes_qtd_max CHECK (qtd_max >= 0),
 
--- =====================================================
--- MOVIMENTAÇÕES DE ESTOQUE
--- =====================================================
--- Histórico de entradas (compras) e saídas (consumo via balança).
--- Cada compra registra preço pago naquele momento -> alimenta gráfico de evolução de preços.
+    INDEX idx_ingredientes_nome (nome),
+    INDEX idx_ingredientes_validade (validade)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci;
+
+-- =====================================================================
+-- TABELA: movimentacoes_estoque
+-- ---------------------------------------------------------------------
+-- Historico de entradas (compras) e saidas (consumo pesado na balanca).
+-- Cada compra guarda o preco pago naquele momento, o que alimenta o
+-- grafico de evolucao de precos e a apuracao do CMV.
+--
+-- ON DELETE CASCADE: excluir o insumo apaga o historico dele, porque uma
+-- movimentacao sem insumo nao significa nada.
+-- =====================================================================
 CREATE TABLE IF NOT EXISTS movimentacoes_estoque (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    ingrediente_id  INTEGER NOT NULL,
-    tipo            TEXT    NOT NULL CHECK (tipo IN ('entrada', 'saida')),
-    quantidade      REAL    NOT NULL,
-    preco_unitario  REAL,
-    observacao      TEXT,
-    data            TEXT    NOT NULL DEFAULT (date('now')),
-    criado_em       TEXT    NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (ingrediente_id) REFERENCES ingredientes(id) ON DELETE CASCADE
-);
+    id             INT           NOT NULL AUTO_INCREMENT,
+    ingrediente_id INT           NOT NULL,
+    tipo           ENUM('entrada', 'saida') NOT NULL,
+    quantidade     DECIMAL(10,3) NOT NULL,
+    preco_unitario DECIMAL(10,2) NULL,
+    validade       DATE          NULL,
+    observacao     VARCHAR(255)  NULL,
+    data           DATE          NOT NULL DEFAULT (CURRENT_DATE),
+    criado_em      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-CREATE INDEX IF NOT EXISTS idx_mov_ingrediente ON movimentacoes_estoque(ingrediente_id);
-CREATE INDEX IF NOT EXISTS idx_mov_data ON movimentacoes_estoque(data);
-CREATE INDEX IF NOT EXISTS idx_mov_tipo ON movimentacoes_estoque(tipo);
+    CONSTRAINT pk_movimentacoes PRIMARY KEY (id),
+    CONSTRAINT fk_mov_ingrediente
+        FOREIGN KEY (ingrediente_id) REFERENCES ingredientes (id)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE,
+    CONSTRAINT ck_mov_quantidade CHECK (quantidade > 0),
 
--- =====================================================
--- RECEITAS (estrutura preparada para uso futuro)
--- =====================================================
--- Cada receita (ex: "Cappuccino") consome quantidades específicas de ingredientes.
-CREATE TABLE IF NOT EXISTS receitas (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    nome        TEXT    NOT NULL UNIQUE,
-    descricao   TEXT,
-    preco_venda REAL,
-    criado_em   TEXT    NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS receita_ingredientes (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    receita_id      INTEGER NOT NULL,
-    ingrediente_id  INTEGER NOT NULL,
-    quantidade      REAL    NOT NULL,
-    FOREIGN KEY (receita_id)     REFERENCES receitas(id)     ON DELETE CASCADE,
-    FOREIGN KEY (ingrediente_id) REFERENCES ingredientes(id) ON DELETE RESTRICT,
-    UNIQUE (receita_id, ingrediente_id)
-);
+    INDEX idx_mov_data (data),
+    INDEX idx_mov_tipo (tipo)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci;

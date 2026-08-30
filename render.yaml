@@ -26,16 +26,28 @@ services:
       - key: AUTO_SEED
         value: "true"
 
-      # ⚠️  DB_URL e DB_AUTH_TOKEN devem ser configurados manualmente no
-      # painel do Render por segurança (não comitar tokens no repo).
+      # ⚠️  Os dados de conexão do MySQL devem ser preenchidos manualmente no
+      # painel do Render por segurança (não comitar senha no repo).
       #
       # No painel: Settings → Environment → Add Environment Variable
-      #   DB_URL          = libsql://seu-banco.turso.io
-      #   DB_AUTH_TOKEN   = (cole o token gerado pelo Turso CLI)
-      - key: DB_URL
+      #
+      # PENDÊNCIA (decisões D2 e D3, ainda em aberto no grupo): o MySQL da
+      # apresentação roda hoje na máquina de um dos integrantes, sem endereço
+      # público. Um servidor no Render não alcança esse banco. Antes de reativar
+      # este deploy é preciso decidir onde o MySQL vai ficar hospedado.
+      - key: DB_HOST
         sync: false           # marca como "secret" — preencher no painel
 
-      - key: DB_AUTH_TOKEN
+      - key: DB_PORT
+        value: "3306"
+
+      - key: DB_NAME
+        value: custo_certo
+
+      - key: DB_USER
+        sync: false
+
+      - key: DB_PASSWORD
         sync: false
 
       - key: ALLOWED_ORIGINS

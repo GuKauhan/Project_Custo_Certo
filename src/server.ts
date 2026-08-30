@@ -43,8 +43,8 @@ async function bootstrap(): Promise<void> {
     // 4) Graceful shutdown
     const shutdown = (signal: string) => {
       console.log(`\n🛑 ${signal} recebido, encerrando...`);
-      server.close(() => {
-        closeDb();
+      server.close(async () => {
+        await closeDb();
         console.log('👋 Servidor encerrado');
         process.exit(0);
       });
