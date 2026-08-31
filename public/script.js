@@ -63,6 +63,9 @@ const pageTitles = {
   dashboard: 'Dashboard',
   balanca: 'Balança Inteligente',
   estoque: 'Estoque',
+  cardapio: 'Ficha Técnica',
+  vendas: 'Vendas',
+  margem: 'Margem e Desperdício',
   evolucao: 'Evolução de Preços',
 };
 
@@ -76,6 +79,9 @@ async function showPage(page, btn) {
   if (page === 'balanca')   popularSelect();
   if (page === 'estoque')   renderEstoque();
   if (page === 'dashboard') renderDashboard();
+  if (page === 'cardapio')  renderCardapio();
+  if (page === 'vendas')    renderVendas();
+  if (page === 'margem')    renderMargem();
   if (page === 'evolucao')  renderEvolucao();
 }
 window.showPage = showPage;
@@ -614,17 +620,14 @@ function renderDashboard() {
     alertas > 0 ? alertas + ' abaixo de 25% do estoque' : 'Todos dentro do limite';
   document.getElementById('kpi-vencendo').textContent = vencendo;
 
-  const receitaEst = totalVal * 3.5;
-  const cmvPct = receitaEst > 0 ? (totalVal / receitaEst) * 100 : 0;
-  const cmvClass = cmvPct <= 31 ? 'ok' : cmvPct <= 35 ? 'warn' : 'bad';
-  document.getElementById('kpi-cmv').textContent = cmvPct.toFixed(1) + '%';
-  document.getElementById('g-custo').textContent = 'R$ ' + totalVal.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
-  document.getElementById('g-receita').textContent = 'R$ ' + receitaEst.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
-  document.getElementById('g-cmv').textContent = cmvPct.toFixed(1) + '%';
-  document.getElementById('g-cmv').className = 'val ' + cmvClass;
-  document.getElementById('g-class').textContent =
-    cmvClass === 'ok' ? '✓ Dentro do ideal' : cmvClass === 'warn' ? '⚠ Levemente alto' : '✗ Acima do limite';
-  document.getElementById('g-class').className = 'val ' + cmvClass;
+  // O CMV vem do servidor, calculado sobre vendas e fichas técnicas.
+  //
+  // Antes ele era montado aqui: a receita era estimada como totalVal * 3.5 e o
+  // CMV era totalVal dividido por essa receita. Os dois lados da divisão eram a
+  // mesma grandeza, então ela se cancelava e o resultado era sempre 1/3,5 —
+  // 28,6%, qualquer que fosse a situação da cafeteria. Como o limite de "ideal"
+  // era 31%, o medidor também apontava para o verde para sempre.
+  carregarIndicadoresDoPainel();
 
   const rl = document.getElementById('rotate-list');
   if (rl) {
@@ -755,6 +758,537 @@ window.setFiltroEvolucao = setFiltroEvolucao;
 
 // ======= TOAST =======
 let toastTimer;
+// =====================================================================
+// INDICADORES DE NEGÓCIO
+// =====================================================================
+// Estas telas existem porque o sistema passou a saber o que a cafeteria VENDE,
+// e não só o que entra e sai do estoque. Sem o lado da receita, nenhum
+// indicador de margem é calculável — era essa a origem do CMV constante.
+
+const fmtBRL = (v) =>
+  'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+const fmtNum = (v) =>
+  Number(v || 0).toLocaleString('pt-BR', { maximumFractionDigits: 3 });
+
+const fmtPct = (v) => Number(v || 0).toFixed(1) + '%';
+
+/** Cache do cardápio, para os selects não irem ao servidor a cada abertura. */
+let cardapioCache = [];
+
+/** Busca o pacote completo de indicadores para um período em dias. */
+async function buscarIndicadores(dias) {
+  return api(`/indicadores?dias=${dias}`);
+}
+
+// ---------------------------------------------------------------- dashboard
+
+async function carregarIndicadoresDoPainel() {
+  try {
+    const dados = await buscarIndicadores(90);
+    const r = dados.resumo;
+
+    const classe = r.classificacaoCmv === 'ok' ? 'ok'
+                 : r.classificacaoCmv === 'atencao' ? 'warn'
+                 : r.classificacaoCmv === 'ruim' ? 'bad' : '';
+
+    const semVenda = !r.temVendas;
+
+    document.getElementById('kpi-cmv').textContent = semVenda ? '—' : fmtPct(r.cmvTeorico);
+    document.getElementById('kpi-cmv-sub').textContent = semVenda
+      ? 'sem vendas no período não há CMV a calcular'
+      : r.rotuloCmv;
+
+    document.getElementById('g-receita').textContent = fmtBRL(r.receita);
+    document.getElementById('g-custo').textContent = fmtBRL(r.custoTeorico);
+    document.getElementById('g-margem').textContent = fmtBRL(r.margemBruta);
+    document.getElementById('g-ticket').textContent = fmtBRL(r.ticketMedio);
+
+    const gCmv = document.getElementById('g-cmv');
+    gCmv.textContent = semVenda ? '—' : fmtPct(r.cmvTeorico);
+    gCmv.className = 'val ' + classe;
+
+    const gClass = document.getElementById('g-class');
+    gClass.textContent = r.rotuloCmv;
+    gClass.className = 'val ' + classe;
+
+    // Compra x consumo denuncia caixa parado na prateleira. Comprar quatro vezes
+    // o que se gasta no mês não é reposição, é estoque inflando.
+    const cc = document.getElementById('g-compra-consumo');
+    if (r.razaoCompraConsumo > 0) {
+      cc.textContent = `Comprou ${fmtBRL(r.compras)} e consumiu ${fmtBRL(r.custoReal)} `
+        + `— ${r.razaoCompraConsumo.toFixed(1)}× o que gastou.`
+        + (r.razaoCompraConsumo > 2 ? ' Isso é caixa parando na prateleira.' : '');
+    } else {
+      cc.textContent = 'Sem baixas de estoque no período, não dá para comparar compra com consumo.';
+    }
+
+    desenharMedidorCmv(semVenda ? 0 : r.cmvTeorico, classe);
+  } catch (e) {
+    showToast('Não foi possível carregar os indicadores: ' + e.message, true);
+  }
+}
+
+/** Desenha o medidor de CMV no canvas, com a faixa ideal marcada. */
+function desenharMedidorCmv(pct, classe) {
+  const canvas = document.getElementById('chart-cmv-gauge');
+  if (!canvas) return;
+
+  const g = canvas.getContext('2d');
+  const cor = classe === 'ok' ? '#00a86b' : classe === 'warn' ? '#f4a435' : classe === 'bad' ? '#e63946' : '#8892a4';
+
+  g.clearRect(0, 0, canvas.width, canvas.height);
+  g.lineWidth = 14;
+  g.lineCap = 'round';
+
+  g.strokeStyle = 'rgba(136,146,164,0.20)';
+  g.beginPath();
+  g.arc(70, 78, 55, Math.PI, 2 * Math.PI);
+  g.stroke();
+
+  // A escala vai até 50%: acima disso o negócio já está fora de qualquer
+  // referência do setor, e esticar o eixo só achataria a faixa que importa.
+  const fracao = Math.max(0, Math.min(1, pct / 50));
+  if (fracao > 0) {
+    g.strokeStyle = cor;
+    g.beginPath();
+    g.arc(70, 78, 55, Math.PI, Math.PI + Math.PI * fracao);
+    g.stroke();
+  }
+
+  g.fillStyle = cor;
+  g.font = '700 22px DM Sans, sans-serif';
+  g.textAlign = 'center';
+  g.fillText(pct > 0 ? fmtPct(pct) : '—', 70, 74);
+}
+
+// ---------------------------------------------------------------- cardápio
+
+async function renderCardapio() {
+  const grade = document.getElementById('cardapio-grid');
+  grade.innerHTML = '<div style="color:var(--muted);font-size:13px">Carregando...</div>';
+
+  try {
+    cardapioCache = await api('/receitas');
+    const semFicha = cardapioCache.filter((r) => !r.temFicha).length;
+
+    document.getElementById('cardapio-sub').textContent =
+      `${cardapioCache.length} produtos no cardápio`
+      + (semFicha > 0 ? ` · ${semFicha} ainda sem ficha` : '');
+
+    if (cardapioCache.length === 0) {
+      grade.innerHTML = '<div style="color:var(--muted);font-size:13px">'
+        + 'Nenhum produto cadastrado. Sem ficha técnica, o sistema não consegue '
+        + 'calcular margem nem CMV.</div>';
+      return;
+    }
+
+    grade.innerHTML = cardapioCache.map(cartaoReceita).join('');
+  } catch (e) {
+    grade.innerHTML = `<div style="color:var(--red);font-size:13px">${e.message}</div>`;
+  }
+}
+
+function cartaoReceita(r) {
+  const linhas = r.itens.map((i) => `
+    <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);padding:2px 0">
+      <span>${i.nome} &nbsp;${fmtNum(i.quantidade)} ${i.unidade}</span>
+      <span>${fmtBRL(i.custo)}</span>
+    </div>`).join('');
+
+  const corpo = r.temFicha
+    ? `${linhas}
+       <div style="margin-top:10px;font-size:13px"><strong>Custo:</strong> ${fmtBRL(r.custo)}</div>
+       <div style="font-size:13px"><strong>Margem:</strong> ${fmtBRL(r.margem)}
+         <span style="color:var(--muted)">· custo é ${fmtPct(r.percentualCusto)} do preço</span></div>`
+    : `<div style="font-size:12px;color:var(--orange);margin-top:8px">
+         Sem ficha técnica. Enquanto ela não existir, este produto fica fora do
+         cálculo de margem e de CMV.
+       </div>`;
+
+  return `
+  <div class="stock-card${r.temFicha ? '' : ' expiry-warning'}">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+      <div style="font-weight:700;font-size:15px">${r.nome}</div>
+      <span style="font-size:11px;padding:2px 8px;border-radius:20px;white-space:nowrap;
+        background:${r.ativo ? 'rgba(0,168,107,0.15)' : 'rgba(230,57,70,0.15)'};
+        color:${r.ativo ? 'var(--green)' : 'var(--red)'}">
+        ${r.ativo ? 'No cardápio' : 'Fora'}
+      </span>
+    </div>
+    ${r.descricao ? `<div style="font-size:12px;color:var(--muted);margin:4px 0">${r.descricao}</div>` : ''}
+    <div style="font-size:18px;font-weight:700;color:var(--green);margin:8px 0">${fmtBRL(r.precoVenda)}</div>
+    ${corpo}
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn-cancel" style="flex:1" onclick="abrirModalReceita(${r.id})"><i class="fas fa-pen"></i> Editar</button>
+      <button class="btn-cancel" style="flex:1" onclick="excluirReceita(${r.id})"><i class="fas fa-trash"></i> Excluir</button>
+    </div>
+  </div>`;
+}
+
+// ------------------------------------------------- modal da ficha técnica
+
+let receitaEmEdicao = null;
+
+async function abrirModalReceita(id) {
+  if (!estoque.length) {
+    showToast('Cadastre ao menos um insumo antes de montar uma ficha técnica.', true);
+    return;
+  }
+
+  receitaEmEdicao = id ? cardapioCache.find((r) => r.id === id) : null;
+
+  document.getElementById('mr-titulo').textContent =
+    receitaEmEdicao ? 'Editar ' + receitaEmEdicao.nome : 'Novo Produto';
+  document.getElementById('mr-nome').value = receitaEmEdicao ? receitaEmEdicao.nome : '';
+  document.getElementById('mr-descricao').value = receitaEmEdicao?.descricao ?? '';
+  document.getElementById('mr-preco').value = receitaEmEdicao ? receitaEmEdicao.precoVenda : 0;
+  document.getElementById('mr-ativo').value = receitaEmEdicao ? (receitaEmEdicao.ativo ? '1' : '0') : '1';
+
+  const linhas = document.getElementById('mr-linhas');
+  linhas.innerHTML = '';
+  if (receitaEmEdicao) {
+    receitaEmEdicao.itens.forEach((i) => adicionarLinhaFicha(i.ingredienteId, i.quantidade));
+  }
+  recalcularFicha();
+
+  document.getElementById('modal-receita-overlay').classList.add('show');
+}
+
+function fecharModalReceita() {
+  document.getElementById('modal-receita-overlay').classList.remove('show');
+  receitaEmEdicao = null;
+}
+
+function adicionarLinhaFicha(ingredienteId, quantidade) {
+  const linhas = document.getElementById('mr-linhas');
+  const div = document.createElement('div');
+  div.className = 'linha-ficha';
+  div.style.cssText = 'display:flex;gap:8px;align-items:center;margin-bottom:8px';
+
+  const opcoes = estoque.map((i) =>
+    `<option value="${i.id}" ${i.id === ingredienteId ? 'selected' : ''}>${i.nome} (${i.unidade})</option>`
+  ).join('');
+
+  div.innerHTML = `
+    <select class="lf-insumo" style="flex:2;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font:inherit" oninput="recalcularFicha()">${opcoes}</select>
+    <input class="lf-qtd" type="number" step="0.001" min="0" value="${quantidade ?? ''}" placeholder="0,018"
+      style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font:inherit" oninput="recalcularFicha()">
+    <button class="btn-cancel" onclick="this.parentElement.remove();recalcularFicha()"><i class="fas fa-trash"></i></button>`;
+
+  linhas.appendChild(div);
+}
+
+/** Soma o custo das linhas preenchidas, para a prévia enquanto se digita. */
+function recalcularFicha() {
+  let custo = 0;
+  document.querySelectorAll('#mr-linhas .linha-ficha').forEach((linha) => {
+    const id = Number(linha.querySelector('.lf-insumo').value);
+    const qtd = parseFloat(linha.querySelector('.lf-qtd').value);
+    const insumo = estoque.find((i) => i.id === id);
+    if (insumo && Number.isFinite(qtd)) custo += insumo.preco * qtd;
+  });
+
+  const preco = parseFloat(document.getElementById('mr-preco').value) || 0;
+  document.getElementById('mr-resumo').innerHTML =
+    `Custo dos insumos: ${fmtBRL(custo)} &nbsp;·&nbsp; Preço: ${fmtBRL(preco)} &nbsp;·&nbsp; `
+    + `<span style="color:${preco - custo >= 0 ? 'var(--green)' : 'var(--red)'}">Margem: ${fmtBRL(preco - custo)}</span>`;
+}
+
+async function salvarReceita() {
+  const itens = [];
+  let invalida = false;
+
+  document.querySelectorAll('#mr-linhas .linha-ficha').forEach((linha) => {
+    const ingredienteId = Number(linha.querySelector('.lf-insumo').value);
+    const quantidade = parseFloat(linha.querySelector('.lf-qtd').value);
+    if (!Number.isFinite(quantidade) || quantidade <= 0) { invalida = true; return; }
+    itens.push({ ingredienteId, quantidade });
+  });
+
+  if (invalida) {
+    showToast('Preencha a quantidade de todas as linhas da ficha.', true);
+    return;
+  }
+
+  const corpo = {
+    nome: document.getElementById('mr-nome').value.trim(),
+    descricao: document.getElementById('mr-descricao').value.trim() || null,
+    precoVenda: parseFloat(document.getElementById('mr-preco').value) || 0,
+    ativo: document.getElementById('mr-ativo').value === '1',
+    itens,
+  };
+
+  try {
+    if (receitaEmEdicao) {
+      await api(`/receitas/${receitaEmEdicao.id}`, { method: 'PUT', body: JSON.stringify(corpo) });
+      showToast('Produto atualizado.');
+    } else {
+      await api('/receitas', { method: 'POST', body: JSON.stringify(corpo) });
+      showToast('Produto cadastrado.');
+    }
+    fecharModalReceita();
+    renderCardapio();
+  } catch (e) {
+    showToast(e.message, true);
+  }
+}
+
+async function excluirReceita(id) {
+  const produto = cardapioCache.find((r) => r.id === id);
+  if (!confirm(`Excluir "${produto?.nome}"? A ficha técnica dele será apagada junto.`)) return;
+
+  try {
+    await api(`/receitas/${id}`, { method: 'DELETE' });
+    showToast('Produto excluído.');
+    renderCardapio();
+  } catch (e) {
+    showToast(e.message, true);
+  }
+}
+
+// ---------------------------------------------------------------- vendas
+
+async function renderVendas() {
+  const dias = document.getElementById('vendas-periodo').value;
+  const tbody = document.getElementById('vendas-tbody');
+  const totais = document.getElementById('vendas-totais');
+
+  tbody.innerHTML = '<tr><td colspan="8" style="color:var(--muted)">Carregando...</td></tr>';
+
+  try {
+    const { vendas } = await api(`/vendas?dias=${dias}`);
+
+    let faturamento = 0, custo = 0, unidades = 0;
+    vendas.forEach((v) => { faturamento += v.total; custo += v.custoTotal; unidades += v.quantidade; });
+    const ticket = unidades > 0 ? faturamento / unidades : 0;
+
+    totais.innerHTML = [
+      cartaoTotal('Faturamento', fmtBRL(faturamento), unidades + ' unidades vendidas', 'var(--green)'),
+      cartaoTotal('Custo dos insumos', fmtBRL(custo), 'pela ficha técnica', 'var(--orange)'),
+      cartaoTotal('Margem bruta', fmtBRL(faturamento - custo), 'antes de aluguel e folha', 'var(--blue)'),
+      cartaoTotal('Ticket médio', fmtBRL(ticket), 'por unidade vendida', 'var(--green)'),
+    ].join('');
+
+    tbody.innerHTML = vendas.length === 0
+      ? '<tr><td colspan="8" style="color:var(--muted)">Nenhuma venda registrada neste período.</td></tr>'
+      : vendas.map((v) => `
+        <tr>
+          <td>${formatDate(v.data)}</td>
+          <td>${v.nomeReceita}</td>
+          <td>${v.quantidade}</td>
+          <td>${fmtBRL(v.precoUnitario)}</td>
+          <td>${fmtBRL(v.total)}</td>
+          <td>${fmtBRL(v.custoTotal)}</td>
+          <td style="color:var(--green)">${fmtBRL(v.margemTotal)}</td>
+          <td><button class="btn-cancel" onclick="excluirVenda(${v.id})"><i class="fas fa-trash"></i></button></td>
+        </tr>`).join('');
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="8" style="color:var(--red)">${e.message}</td></tr>`;
+  }
+}
+
+function cartaoTotal(rotulo, valor, legenda, cor) {
+  return `
+  <div class="kpi-card" style="--accent-color:${cor}">
+    <div class="kpi-label">${rotulo}</div>
+    <div class="kpi-value">${valor}</div>
+    <div class="kpi-sub">${legenda}</div>
+  </div>`;
+}
+
+async function abrirModalVenda() {
+  try {
+    if (!cardapioCache.length) cardapioCache = await api('/receitas');
+  } catch (e) {
+    showToast(e.message, true);
+    return;
+  }
+
+  const ativos = cardapioCache.filter((r) => r.ativo);
+  if (!ativos.length) {
+    showToast('Nenhum produto ativo no cardápio. Cadastre um na Ficha Técnica.', true);
+    return;
+  }
+
+  document.getElementById('mv-produto').innerHTML =
+    ativos.map((r) => `<option value="${r.id}">${r.nome}</option>`).join('');
+  document.getElementById('mv-qtd').value = 1;
+  document.getElementById('mv-data').value = new Date().toISOString().slice(0, 10);
+  document.getElementById('mv-obs').value = '';
+  aoTrocarProdutoVenda();
+
+  document.getElementById('modal-venda-overlay').classList.add('show');
+}
+
+function fecharModalVenda() {
+  document.getElementById('modal-venda-overlay').classList.remove('show');
+}
+
+function aoTrocarProdutoVenda() {
+  const id = Number(document.getElementById('mv-produto').value);
+  const produto = cardapioCache.find((r) => r.id === id);
+  if (!produto) return;
+
+  document.getElementById('mv-preco').value = produto.precoVenda;
+  document.getElementById('mv-previa').textContent = produto.temFicha
+    ? `Custo pela ficha: ${fmtBRL(produto.custo)} · margem por unidade: ${fmtBRL(produto.margem)}`
+    : 'Este produto não tem ficha técnica, então a venda entra sem custo e a margem sai inflada.';
+}
+
+async function salvarVenda() {
+  const corpo = {
+    receitaId: Number(document.getElementById('mv-produto').value),
+    quantidade: parseInt(document.getElementById('mv-qtd').value, 10),
+    precoUnitario: parseFloat(document.getElementById('mv-preco').value),
+    data: document.getElementById('mv-data').value || undefined,
+    observacao: document.getElementById('mv-obs').value.trim() || null,
+  };
+
+  try {
+    await api('/vendas', { method: 'POST', body: JSON.stringify(corpo) });
+    showToast('Venda registrada.');
+    fecharModalVenda();
+    renderVendas();
+  } catch (e) {
+    showToast(e.message, true);
+  }
+}
+
+async function excluirVenda(id) {
+  if (!confirm('Remover este lançamento? O estoque não é afetado.')) return;
+  try {
+    await api(`/vendas/${id}`, { method: 'DELETE' });
+    showToast('Lançamento removido.');
+    renderVendas();
+  } catch (e) {
+    showToast(e.message, true);
+  }
+}
+
+// ------------------------------------------------------ margem e desperdício
+
+const QUADRANTES = {
+  estrela: { titulo: 'Estrelas', eixos: 'margem alta · vende muito', acao: 'Proteger. Destaque no cardápio e cuidado ao mexer no preço.' },
+  cavalo:  { titulo: 'Cavalos de carga', eixos: 'margem baixa · vende muito', acao: 'Consertar. Renegociar insumo ou revisar a porção — pelo volume, ganho pequeno aqui rende muito.' },
+  enigma:  { titulo: 'Enigmas', eixos: 'margem alta · vende pouco', acao: 'Promover. Reposicionar no cardápio e sugerir no balcão.' },
+  abacaxi: { titulo: 'Abacaxis', eixos: 'margem baixa · vende pouco', acao: 'Remover ou repensar. Ocupa espaço no cardápio e no estoque.' },
+};
+
+async function renderMargem() {
+  const dias = document.getElementById('margem-periodo').value;
+
+  try {
+    const dados = await buscarIndicadores(dias);
+    document.getElementById('margem-sub').textContent =
+      `${dados.periodo.inicio} a ${dados.periodo.fim}`;
+
+    renderQuadrantes(dados.cardapio);
+    renderTabelaProdutos(dados.cardapio);
+    renderVariancia(dados.variancias);
+  } catch (e) {
+    showToast('Não foi possível carregar a análise: ' + e.message, true);
+  }
+}
+
+function renderQuadrantes(produtos) {
+  const porQuadrante = { estrela: [], cavalo: [], enigma: [], abacaxi: [] };
+  const fora = [];
+
+  produtos.forEach((p) => {
+    if (p.quadrante) porQuadrante[p.quadrante].push(p);
+    else fora.push(p);
+  });
+
+  document.getElementById('quadrantes').innerHTML =
+    Object.keys(QUADRANTES).map((chave) => {
+      const q = QUADRANTES[chave];
+      const lista = porQuadrante[chave];
+
+      const itens = lista.length
+        ? lista.map((p) => `
+            <div style="display:flex;justify-content:space-between;font-size:13px;padding:3px 0">
+              <span style="font-weight:600">${p.nome}</span>
+              <span style="color:var(--muted)">${p.unidadesVendidas} un · ${fmtBRL(p.margemTotal)}</span>
+            </div>`).join('')
+        : '<div style="font-size:12px;color:var(--muted)">nenhum produto aqui</div>';
+
+      return `
+      <div class="card">
+        <div class="card-title">${q.titulo}</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:8px">${q.eixos}</div>
+        ${itens}
+        <div style="font-size:12px;color:var(--muted);margin-top:10px">${q.acao}</div>
+      </div>`;
+    }).join('');
+
+  document.getElementById('fora-da-analise').textContent = fora.length === 0 ? '' :
+    'Fora da classificação: '
+    + fora.map((p) => p.nome + (p.temFicha ? ' (sem venda)' : ' (sem ficha)')).join(', ')
+    + '. Produto sem venda não tem popularidade a medir, e produto sem ficha teria custo zero — '
+    + 'entraria como margem máxima e distorceria a média de todos os outros.';
+}
+
+function renderTabelaProdutos(produtos) {
+  document.getElementById('produtos-tbody').innerHTML = produtos.map((p) => `
+    <tr>
+      <td>${p.nome}</td>
+      <td>${p.unidadesVendidas}</td>
+      <td>${fmtBRL(p.precoMedio)}</td>
+      <td>${p.temFicha ? fmtBRL(p.custoUnitario) : '<span style="color:var(--orange)">sem ficha</span>'}</td>
+      <td>${p.temFicha ? fmtBRL(p.margemUnitaria) : '—'}</td>
+      <td>${p.temFicha ? fmtBRL(p.margemTotal) : '—'}</td>
+      <td>${p.temFicha ? fmtPct(p.percentualCusto) : '—'}</td>
+    </tr>`).join('');
+}
+
+function renderVariancia(variancias) {
+  const comparaveis = variancias.filter((v) => !v.semBaixaRegistrada && v.teorico > 0);
+  const semBaixa = variancias.filter((v) => v.semBaixaRegistrada);
+
+  const perda = comparaveis
+    .filter((v) => v.custoDiferenca > 0)
+    .reduce((s, v) => s + v.custoDiferenca, 0);
+
+  document.getElementById('variancia-resumo').textContent = comparaveis.length === 0
+    ? 'Ainda não há período com vendas e baixas de estoque ao mesmo tempo. A comparação precisa dos dois lados.'
+    : `Saiu do estoque além do que as vendas pediam: ${fmtBRL(perda)} no período.`;
+
+  const cor = (c) => c === 'bom' ? 'var(--green)' : c === 'tipico' ? 'var(--orange)' : 'var(--red)';
+  const rotulo = (c) => c === 'bom' ? 'controlado' : c === 'tipico' ? 'aceitável' : 'investigar';
+
+  document.getElementById('variancia-tbody').innerHTML = comparaveis.map((v) => `
+    <tr>
+      <td>${v.nome}</td>
+      <td>${fmtNum(v.teorico)} ${v.unidade}</td>
+      <td>${fmtNum(v.real)} ${v.unidade}</td>
+      <td>${v.diferenca > 0 ? '+' : ''}${fmtNum(v.diferenca)} ${v.unidade}</td>
+      <td>${v.percentual > 0 ? '+' : ''}${fmtPct(v.percentual)}</td>
+      <td>${fmtBRL(v.custoDiferenca)}</td>
+      <td><span style="color:${cor(v.classificacao)};font-weight:600">${rotulo(v.classificacao)}</span></td>
+    </tr>`).join('');
+
+  document.getElementById('variancia-sem-baixa').textContent = semBaixa.length === 0 ? '' :
+    'Sem consumo real para comparar: ' + semBaixa.map((v) => v.nome).join(', ')
+    + '. Estes insumos entram nas fichas técnicas mas não passam pela balança, então o '
+    + 'sistema não sabe quanto realmente saiu — e não seria honesto exibir 100% de variação para eles.';
+}
+
+window.renderCardapio = renderCardapio;
+window.renderVendas = renderVendas;
+window.renderMargem = renderMargem;
+window.abrirModalReceita = abrirModalReceita;
+window.fecharModalReceita = fecharModalReceita;
+window.adicionarLinhaFicha = adicionarLinhaFicha;
+window.recalcularFicha = recalcularFicha;
+window.salvarReceita = salvarReceita;
+window.excluirReceita = excluirReceita;
+window.abrirModalVenda = abrirModalVenda;
+window.fecharModalVenda = fecharModalVenda;
+window.aoTrocarProdutoVenda = aoTrocarProdutoVenda;
+window.salvarVenda = salvarVenda;
+window.excluirVenda = excluirVenda;
+
 function showToast(msg, err = false) {
   const el = document.getElementById('toast');
   if (!el) { console.log(msg); return; }

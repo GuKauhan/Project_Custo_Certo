@@ -7,11 +7,15 @@
 import { Router } from 'express';
 import ingredientesRoutes from './ingredientesRoutes.js';
 import balancaRoutes from './balancaRoutes.js';
+import { receitasRouter, vendasRouter, indicadoresRouter } from './cardapioRoutes.js';
 
 const router = Router();
 
 router.use('/ingredientes', ingredientesRoutes);
 router.use('/balanca', balancaRoutes);
+router.use('/receitas', receitasRouter);
+router.use('/vendas', vendasRouter);
+router.use('/indicadores', indicadoresRouter);
 
 // Health check — útil para o Render verificar que o serviço está vivo
 router.get('/health', (_req, res) => {

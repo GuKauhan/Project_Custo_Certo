@@ -633,7 +633,17 @@
         <button class="nav-btn" onclick="showPage('estoque',this)">
             <i class="fas fa-boxes-stacked"></i> Estoque
         </button>
+        <div class="nav-label" style="margin-top:16px;">Cardápio</div>
+        <button class="nav-btn" onclick="showPage('cardapio',this)">
+            <i class="fas fa-utensils"></i> Ficha Técnica
+        </button>
+        <button class="nav-btn" onclick="showPage('vendas',this)">
+            <i class="fas fa-cash-register"></i> Vendas
+        </button>
         <div class="nav-label" style="margin-top:16px;">Análises</div>
+        <button class="nav-btn" onclick="showPage('margem',this)">
+            <i class="fas fa-scale-unbalanced"></i> Margem e Desperdício
+        </button>
         <button class="nav-btn" onclick="showPage('evolucao',this)">
             <i class="fas fa-chart-line"></i> Evolução de Preços
         </button>
@@ -669,9 +679,9 @@
                 </div>
                 <div class="kpi-card" style="--accent-color:var(--blue)">
                     <i class="fas fa-percent kpi-icon"></i>
-                    <div class="kpi-label">CMV Estimado</div>
+                    <div class="kpi-label">CMV do Período</div>
                     <div class="kpi-value" id="kpi-cmv">—%</div>
-                    <div class="kpi-sub">Meta: 28–31% da receita</div>
+                    <div class="kpi-sub" id="kpi-cmv-sub">ideal até 25% para cafeteria</div>
                 </div>
                 <div class="kpi-card" style="--accent-color:var(--orange)">
                     <i class="fas fa-clock kpi-icon"></i>
@@ -694,17 +704,20 @@
 
             <div class="charts-row">
                 <div class="card">
-                    <div class="card-title">CMV — Custo da Mercadoria Vendida</div>
-                    <div style="margin-bottom:10px;font-size:12px;color:var(--muted)">Mede o custo direto de produção em relação à receita. O ideal fica entre <strong style="color:var(--green)">28% e 31%</strong>.</div>
+                    <div class="card-title">Resultado do Período</div>
+                    <div style="margin-bottom:10px;font-size:12px;color:var(--muted)">Receita medida em <strong>vendas</strong>, custo calculado pelas <strong>fichas técnicas</strong>. Referência de cafeteria: CMV até <strong style="color:var(--green)">25%</strong>.</div>
                     <div class="gauge-wrap">
                         <canvas id="chart-cmv-gauge" width="140" height="140" style="flex-shrink:0"></canvas>
                         <div class="gauge-labels">
-                            <div class="gauge-row"><span class="lbl">Custo Estoque Atual</span><span class="val" id="g-custo">R$ 0</span></div>
-                            <div class="gauge-row"><span class="lbl">Receita Estimada</span><span class="val" id="g-receita">R$ 0</span></div>
-                            <div class="gauge-row"><span class="lbl">CMV Calculado</span><span class="val ok" id="g-cmv">—</span></div>
+                            <div class="gauge-row"><span class="lbl">Faturamento</span><span class="val" id="g-receita">R$ 0</span></div>
+                            <div class="gauge-row"><span class="lbl">Custo pela ficha</span><span class="val" id="g-custo">R$ 0</span></div>
+                            <div class="gauge-row"><span class="lbl">Margem bruta</span><span class="val" id="g-margem">R$ 0</span></div>
+                            <div class="gauge-row"><span class="lbl">Ticket médio</span><span class="val" id="g-ticket">R$ 0</span></div>
+                            <div class="gauge-row"><span class="lbl">CMV</span><span class="val ok" id="g-cmv">—</span></div>
                             <div class="gauge-row"><span class="lbl">Classificação</span><span class="val" id="g-class">—</span></div>
                         </div>
                     </div>
+                    <div style="margin-top:14px;font-size:12px;color:var(--muted)" id="g-compra-consumo"></div>
                 </div>
                 <div class="card">
                     <div class="card-title">Rotatividade de Estoque</div>
@@ -789,6 +802,91 @@
                     <thead><tr><th>Data</th><th>Produto</th><th>Unidade</th><th>Qtd Comprada</th><th>Custo/Un (R$)</th><th>Total (R$)</th></tr></thead>
                     <tbody id="historico-tbody"></tbody>
                 </table>
+            </div>
+        </div>
+
+
+        <!-- ======= FICHA TECNICA ======= -->
+        <div id="page-cardapio" class="page">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;flex-wrap:wrap;gap:12px">
+                <div>
+                    <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;color:var(--text)">Ficha Técnica</div>
+                    <div style="font-size:12px;color:var(--muted);margin-top:2px" id="cardapio-sub">O que a cafeteria vende, e quanto cada produto custa.</div>
+                </div>
+                <button class="btn-add" onclick="abrirModalReceita()"><i class="fas fa-plus"></i> Novo Produto</button>
+            </div>
+            <div style="font-size:12px;color:var(--muted);margin-bottom:14px">
+                O custo não fica gravado: é somado a partir do preço que os insumos têm agora.
+                Quando o fornecedor reajusta o café, a margem do cappuccino cai sozinha.
+            </div>
+            <div class="stock-grid" id="cardapio-grid"></div>
+        </div>
+
+        <!-- ======= VENDAS ======= -->
+        <div id="page-vendas" class="page">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;flex-wrap:wrap;gap:12px">
+                <div>
+                    <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;color:var(--text)">Vendas</div>
+                    <div style="font-size:12px;color:var(--muted);margin-top:2px">Registrar uma venda não abate o estoque — a baixa vem da balança, por um caminho separado. É isso que permite comparar os dois depois.</div>
+                </div>
+                <div style="display:flex;gap:10px;align-items:center">
+                    <select id="vendas-periodo" onchange="renderVendas()" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font:inherit">
+                        <option value="30">Últimos 30 dias</option>
+                        <option value="90" selected>Últimos 90 dias</option>
+                        <option value="365">Último ano</option>
+                    </select>
+                    <button class="btn-add" onclick="abrirModalVenda()"><i class="fas fa-plus"></i> Registrar Venda</button>
+                </div>
+            </div>
+            <div class="kpi-grid" id="vendas-totais" style="margin-bottom:18px"></div>
+            <div class="card">
+                <div class="card-title">Lançamentos</div>
+                <table class="cost-table">
+                    <thead><tr><th>Data</th><th>Produto</th><th>Qtd</th><th>Preço un.</th><th>Total</th><th>Custo</th><th>Margem</th><th></th></tr></thead>
+                    <tbody id="vendas-tbody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- ======= MARGEM E DESPERDICIO ======= -->
+        <div id="page-margem" class="page">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;flex-wrap:wrap;gap:12px">
+                <div>
+                    <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;color:var(--text)">Margem e Desperdício</div>
+                    <div style="font-size:12px;color:var(--muted);margin-top:2px" id="margem-sub">Onde o dinheiro está sendo feito, e onde está sendo perdido.</div>
+                </div>
+                <select id="margem-periodo" onchange="renderMargem()" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font:inherit">
+                    <option value="30">Últimos 30 dias</option>
+                    <option value="90" selected>Últimos 90 dias</option>
+                    <option value="365">Último ano</option>
+                </select>
+            </div>
+
+            <div class="card" style="margin-bottom:16px">
+                <div class="card-title">Engenharia de Cardápio</div>
+                <div style="margin-bottom:12px;font-size:12px;color:var(--muted)">Cada produto comparado com a média do próprio cardápio no período. Cada quadrante tem uma ação clara.</div>
+                <div class="charts-row" id="quadrantes"></div>
+                <div id="fora-da-analise" style="margin-top:12px;font-size:12px;color:var(--orange)"></div>
+            </div>
+
+            <div class="card" style="margin-bottom:16px">
+                <div class="card-title">Desempenho por Produto</div>
+                <table class="cost-table">
+                    <thead><tr><th>Produto</th><th>Vendidas</th><th>Preço médio</th><th>Custo</th><th>Margem un.</th><th>Margem total</th><th>Custo %</th></tr></thead>
+                    <tbody id="produtos-tbody"></tbody>
+                </table>
+            </div>
+
+            <div class="card">
+                <div class="card-title">Consumo Teórico × Real</div>
+                <div style="margin-bottom:12px;font-size:12px;color:var(--muted)">O que as vendas pediam, contra o que a balança pesou. A diferença é dose exagerada, desperdício ou perda.</div>
+                <div id="variancia-resumo" style="margin-bottom:12px;font-weight:600"></div>
+                <table class="cost-table">
+                    <thead><tr><th>Insumo</th><th>Teórico</th><th>Real</th><th>Diferença</th><th>Variação</th><th>Custo</th><th>Leitura</th></tr></thead>
+                    <tbody id="variancia-tbody"></tbody>
+                </table>
+                <div id="variancia-sem-baixa" style="margin-top:12px;font-size:12px;color:var(--orange)"></div>
+                <div style="margin-top:10px;font-size:12px;color:var(--muted)">Referência do setor: variação até 2% indica operação bem controlada; de 2% a 5% é o comum; acima disso vale investigar.</div>
             </div>
         </div>
 
@@ -919,5 +1017,81 @@
 </div>
 
 <script src="script.js"></script>
+
+<!-- MODAL: PRODUTO / FICHA TECNICA -->
+<div class="modal-overlay" id="modal-receita-overlay">
+    <div class="modal" style="max-width:640px">
+        <div class="modal-title" id="mr-titulo">Novo Produto</div>
+        <div class="form-grid">
+            <div class="form-group form-full">
+                <label>Nome do produto</label>
+                <input type="text" id="mr-nome" placeholder="Cappuccino">
+            </div>
+            <div class="form-group form-full">
+                <label>Descrição</label>
+                <input type="text" id="mr-descricao" placeholder="Expresso, leite vaporizado e canela">
+            </div>
+            <div class="form-group">
+                <label>Preço de venda (R$)</label>
+                <input type="number" id="mr-preco" step="0.01" min="0" value="0" oninput="recalcularFicha()">
+            </div>
+            <div class="form-group">
+                <label>Situação</label>
+                <select id="mr-ativo">
+                    <option value="1">No cardápio</option>
+                    <option value="0">Fora do cardápio</option>
+                </select>
+            </div>
+        </div>
+
+        <div style="margin-top:14px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:var(--muted)">Ficha técnica</div>
+        <div style="font-size:12px;color:var(--muted);margin:6px 0 10px">
+            A quantidade vai na unidade do próprio insumo. Café cadastrado em kg, 18 gramas por dose, se escreve 0,018.
+        </div>
+        <div id="mr-linhas"></div>
+        <button class="btn-cancel" style="margin-top:8px" onclick="adicionarLinhaFicha()"><i class="fas fa-plus"></i> Adicionar insumo</button>
+        <div id="mr-resumo" style="margin-top:12px;font-weight:600;font-size:13px"></div>
+
+        <div class="modal-actions">
+            <button class="btn-cancel" onclick="fecharModalReceita()">Cancelar</button>
+            <button class="btn-save" onclick="salvarReceita()"><i class="fas fa-save"></i> Salvar</button>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL: VENDA -->
+<div class="modal-overlay" id="modal-venda-overlay">
+    <div class="modal">
+        <div class="modal-title">Registrar Venda</div>
+        <div class="form-grid">
+            <div class="form-group form-full">
+                <label>Produto</label>
+                <select id="mv-produto" onchange="aoTrocarProdutoVenda()"></select>
+            </div>
+            <div class="form-group">
+                <label>Quantidade</label>
+                <input type="number" id="mv-qtd" min="1" step="1" value="1">
+            </div>
+            <div class="form-group">
+                <label>Preço praticado (R$)</label>
+                <input type="number" id="mv-preco" step="0.01" min="0" value="0">
+            </div>
+            <div class="form-group form-full">
+                <label>Data</label>
+                <input type="date" id="mv-data">
+            </div>
+            <div class="form-group form-full">
+                <label>Observação</label>
+                <input type="text" id="mv-obs" placeholder="Movimento da tarde">
+            </div>
+        </div>
+        <div id="mv-previa" style="margin-top:10px;font-size:12px;color:var(--muted)"></div>
+        <div class="modal-actions">
+            <button class="btn-cancel" onclick="fecharModalVenda()">Cancelar</button>
+            <button class="btn-save" onclick="salvarVenda()"><i class="fas fa-save"></i> Registrar</button>
+        </div>
+    </div>
+</div>
+
 </body>
 </html>

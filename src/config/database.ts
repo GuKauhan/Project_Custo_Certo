@@ -180,6 +180,45 @@ export async function batch(comandos: Comando[], _modo?: string): Promise<Result
 }
 
 /**
+ * Executa vários comandos em transação, quando um depende do resultado do outro.
+ *
+ * `batch` recebe todos os comandos de uma vez e não serve para isso: gravar uma
+ * ficha técnica exige inserir a receita, ler o id gerado e só então inserir os
+ * itens que apontam para ele. Aqui o callback recebe uma função de execução
+ * amarrada à mesma conexão, e portanto à mesma transação.
+ *
+ * Ou tudo é gravado, ou nada é — um produto nunca fica com a ficha pela metade.
+ */
+export async function transacao<T>(
+  fn: (executar: (comando: string | Comando) => Promise<Resultado>) => Promise<T>,
+): Promise<T> {
+  const db = getPool();
+  const conexao: PoolConnection = await db.getConnection();
+
+  try {
+    await conexao.beginTransaction();
+
+    const executar = async (comando: string | Comando): Promise<Resultado> => {
+      if (typeof comando === 'string') {
+        const [retorno] = await conexao.query(comando);
+        return normalizar(retorno);
+      }
+      const [retorno] = await conexao.execute(comando.sql, comando.args ?? []);
+      return normalizar(retorno);
+    };
+
+    const resultado = await fn(executar);
+    await conexao.commit();
+    return resultado;
+  } catch (erro) {
+    await conexao.rollback();
+    throw erro;
+  } finally {
+    conexao.release();
+  }
+}
+
+/**
  * Executa um script com vários comandos separados por ponto e vírgula.
  *
  * Usada apenas para aplicar o schema. Os comentários de linha são removidos
@@ -208,21 +247,24 @@ export async function executeMultiple(script: string): Promise<void> {
  * as chamadas `db.execute(...)` e `db.batch(...)` continuam idênticas.
  */
 export function getDb() {
-  return { execute, batch, executeMultiple };
+  return { execute, batch, executeMultiple, transacao };
 }
 
 /** Tabelas que o painel web precisa encontrar no banco para funcionar. */
-const TABELAS_NECESSARIAS = ['ingredientes', 'movimentacoes_estoque'];
+const TABELAS_NECESSARIAS = ['ingredientes', 'movimentacoes_estoque',
+                             'receitas', 'receita_ingredientes', 'vendas'];
 
 /**
  * Descobre quais das tabelas necessárias ainda não existem no banco.
  */
 async function tabelasAusentes(): Promise<string[]> {
+  const marcadores = TABELAS_NECESSARIAS.map(() => '?').join(', ');
+
   const { rows } = await execute({
     sql: `SELECT table_name AS nome
             FROM information_schema.tables
            WHERE table_schema = DATABASE()
-             AND table_name IN (?, ?)`,
+             AND table_name IN (${marcadores})`,
     args: TABELAS_NECESSARIAS,
   });
 

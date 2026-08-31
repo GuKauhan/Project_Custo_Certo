@@ -88,3 +88,94 @@ CREATE TABLE IF NOT EXISTS movimentacoes_estoque (
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_unicode_ci;
+
+-- =====================================================================
+-- TABELA: receitas
+-- ---------------------------------------------------------------------
+-- O que a cafeteria vende, e por quanto. E a "ficha tecnica" da gestao
+-- de restaurante.
+--
+-- preco_venda e o preco DE TABELA. O preco efetivamente praticado em
+-- cada venda fica na tabela vendas -- eles divergem em promocao,
+-- cortesia ou reajuste.
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS receitas (
+    id            INT           NOT NULL AUTO_INCREMENT,
+    nome          VARCHAR(120)  NOT NULL,
+    descricao     VARCHAR(255)  NULL,
+    preco_venda   DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    ativo         BOOLEAN       NOT NULL DEFAULT TRUE,
+    criado_em     DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    atualizado_em DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    CONSTRAINT pk_receitas       PRIMARY KEY (id),
+    CONSTRAINT uk_receitas_nome  UNIQUE (nome),
+    CONSTRAINT ck_receitas_preco CHECK (preco_venda >= 0),
+    CONSTRAINT ck_receitas_nome  CHECK (CHAR_LENGTH(TRIM(nome)) >= 2),
+
+    INDEX idx_receitas_ativo (ativo)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci;
+
+-- =====================================================================
+-- TABELA: receita_ingredientes
+-- ---------------------------------------------------------------------
+-- Quanto de cada insumo entra em uma unidade do produto. Resolve o
+-- relacionamento N:M entre receitas e ingredientes.
+--
+-- ON DELETE RESTRICT no ingrediente, ao contrario do CASCADE das
+-- movimentacoes: excluir um insumo em silencio deixaria metade do
+-- cardapio com a ficha tecnica furada.
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS receita_ingredientes (
+    id             INT           NOT NULL AUTO_INCREMENT,
+    receita_id     INT           NOT NULL,
+    ingrediente_id INT           NOT NULL,
+    quantidade     DECIMAL(10,3) NOT NULL,
+
+    CONSTRAINT pk_receita_ingredientes PRIMARY KEY (id),
+    CONSTRAINT fk_ri_receita
+        FOREIGN KEY (receita_id) REFERENCES receitas (id)
+        ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT fk_ri_ingrediente
+        FOREIGN KEY (ingrediente_id) REFERENCES ingredientes (id)
+        ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT uk_ri_receita_ingrediente UNIQUE (receita_id, ingrediente_id),
+    CONSTRAINT ck_ri_quantidade CHECK (quantidade > 0),
+
+    INDEX idx_ri_ingrediente (ingrediente_id)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci;
+
+-- =====================================================================
+-- TABELA: vendas
+-- ---------------------------------------------------------------------
+-- Uma linha por produto vendido em um dia. Nao e um PDV: registra o
+-- suficiente para calcular receita, margem e CMV.
+--
+-- ON DELETE RESTRICT: nao deixa excluir um produto ja vendido, senao o
+-- historico de faturamento ficaria orfao.
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS vendas (
+    id             INT           NOT NULL AUTO_INCREMENT,
+    receita_id     INT           NOT NULL,
+    quantidade     INT           NOT NULL,
+    preco_unitario DECIMAL(10,2) NOT NULL,
+    observacao     VARCHAR(255)  NULL,
+    data           DATE          NOT NULL DEFAULT (CURRENT_DATE),
+    criado_em      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT pk_vendas PRIMARY KEY (id),
+    CONSTRAINT fk_vendas_receita
+        FOREIGN KEY (receita_id) REFERENCES receitas (id)
+        ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT ck_vendas_quantidade CHECK (quantidade > 0),
+    CONSTRAINT ck_vendas_preco      CHECK (preco_unitario >= 0),
+
+    INDEX idx_vendas_data (data),
+    INDEX idx_vendas_receita (receita_id)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci;
