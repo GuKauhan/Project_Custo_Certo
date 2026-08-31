@@ -13,6 +13,7 @@
 
 import 'dotenv/config';
 import { createApp } from './app.js';
+import { balancaService } from './services/balanca.service.js';
 import { initSchema, closeDb } from './config/database.js';
 import { runSeed } from './database/seed.js';
 
@@ -29,7 +30,10 @@ async function bootstrap(): Promise<void> {
       await runSeed();
     }
 
-    // 3) Cria e sobe o app
+    // 3) Passa a consultar a balança, se houver uma configurada
+    const pararBalanca = balancaService.iniciarLeituraDoDispositivo();
+
+    // 4) Cria e sobe o app
     const app = createApp();
     const server = app.listen(PORT, HOST, () => {
       console.log('');
@@ -43,6 +47,7 @@ async function bootstrap(): Promise<void> {
     // 4) Graceful shutdown
     const shutdown = (signal: string) => {
       console.log(`\n🛑 ${signal} recebido, encerrando...`);
+      pararBalanca();
       server.close(async () => {
         await closeDb();
         console.log('👋 Servidor encerrado');

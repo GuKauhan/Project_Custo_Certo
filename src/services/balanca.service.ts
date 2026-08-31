@@ -8,6 +8,7 @@
 
 import { pesagemRepository } from '../repositories/pesagem.repo.js';
 import type { PesoSnapshot } from '../repositories/pesagem.repo.js';
+import * as dispositivo from './balanca-dispositivo.js';
 import { ingredienteService } from './ingrediente.service.js';
 import { AppError } from '../errors/app-error.js';
 import type {
@@ -29,9 +30,47 @@ export const balancaService = {
     };
   },
 
-  /** Frontend solicita tara */
-  solicitarTara(): void {
+  /**
+   * Frontend solicita tara.
+   *
+   * Com a balança configurada como dispositivo de rede, o pedido vai direto
+   * para ela. Isso encerra um acoplamento antigo: a tara era uma flag guardada
+   * aqui, que o firmware consumia na resposta do POST de peso — e por isso
+   * firmware e backend tinham de subir juntos, sob pena de o pedido nunca
+   * chegar ao aparelho.
+   *
+   * Sem BALANCA_URL definida, o servidor volta ao comportamento antigo e guarda
+   * a flag, porque nesse caso é a balança que está empurrando as leituras — e é
+   * na resposta delas que o pedido de tara consegue viajar de volta.
+   */
+  async solicitarTara(): Promise<{ ok: boolean; via: string }> {
+    if (dispositivo.estaConfigurado()) {
+      const aceitou = await dispositivo.enviarTara();
+      if (aceitou) {
+        return { ok: true, via: 'dispositivo' };
+      }
+      // A balança não respondeu. Guardar a flag ainda dá certo se ela estiver
+      // empurrando leituras para cá em paralelo.
+      pesagemRepository.solicitarTara();
+      return { ok: false, via: 'dispositivo-sem-resposta' };
+    }
+
     pesagemRepository.solicitarTara();
+    return { ok: true, via: 'flag' };
+  },
+
+  /**
+   * Começa a consultar a balança, quando há uma configurada.
+   *
+   * Cada leitura entra no mesmo estado em memória que as leituras empurradas,
+   * então o navegador continua recebendo tudo por SSE sem saber a diferença.
+   *
+   * @returns função que interrompe a consulta
+   */
+  iniciarLeituraDoDispositivo(): () => void {
+    return dispositivo.iniciarLeituraContinua((leitura) => {
+      pesagemRepository.setPeso(leitura.peso);
+    });
   },
 
   /** ESP32 verifica se deve tarar (consome a flag) */

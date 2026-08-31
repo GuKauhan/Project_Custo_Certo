@@ -91,9 +91,9 @@ export const balancaController = {
   },
 
   /** POST /balanca/tara — Frontend solicita */
-  solicitarTara(_req: Request, res: Response): void {
-    balancaService.solicitarTara();
-    res.json({ ok: true });
+  async solicitarTara(_req: Request, res: Response): Promise<void> {
+    const resultado = await balancaService.solicitarTara();
+    res.json(resultado);
   },
 
   /** GET /balanca/tara — ESP32 verifica e zera flag */
