@@ -952,11 +952,11 @@ async function abrirModalReceita(id) {
   }
   recalcularFicha();
 
-  document.getElementById('modal-receita-overlay').classList.add('show');
+  document.getElementById('modal-receita-overlay').classList.add('open');
 }
 
 function fecharModalReceita() {
-  document.getElementById('modal-receita-overlay').classList.remove('show');
+  document.getElementById('modal-receita-overlay').classList.remove('open');
   receitaEmEdicao = null;
 }
 
@@ -1118,11 +1118,11 @@ async function abrirModalVenda() {
   document.getElementById('mv-obs').value = '';
   aoTrocarProdutoVenda();
 
-  document.getElementById('modal-venda-overlay').classList.add('show');
+  document.getElementById('modal-venda-overlay').classList.add('open');
 }
 
 function fecharModalVenda() {
-  document.getElementById('modal-venda-overlay').classList.remove('show');
+  document.getElementById('modal-venda-overlay').classList.remove('open');
 }
 
 function aoTrocarProdutoVenda() {

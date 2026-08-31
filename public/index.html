@@ -218,6 +218,11 @@
         }
 
         .charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+        .charts-row > * { min-width: 0; }
+        @media (max-width: 1100px) { .charts-row { grid-template-columns: 1fr; } }
+        .kpi-grid > * { min-width: 0; }
+        .tabela-rolavel { overflow-x: auto; }
+        .tabela-rolavel table { min-width: 620px; }
         .chart-full { grid-column: span 2; }
         .chart-box { position: relative; height: 220px; width: 100%; }
         .chart-box canvas { position: absolute; inset: 0; }
@@ -841,10 +846,12 @@
             <div class="kpi-grid" id="vendas-totais" style="margin-bottom:18px"></div>
             <div class="card">
                 <div class="card-title">Lançamentos</div>
-                <table class="cost-table">
-                    <thead><tr><th>Data</th><th>Produto</th><th>Qtd</th><th>Preço un.</th><th>Total</th><th>Custo</th><th>Margem</th><th></th></tr></thead>
-                    <tbody id="vendas-tbody"></tbody>
-                </table>
+                <div class="tabela-rolavel">
+                    <table class="cost-table">
+                        <thead><tr><th>Data</th><th>Produto</th><th>Qtd</th><th>Preço un.</th><th>Total</th><th>Custo</th><th>Margem</th><th></th></tr></thead>
+                        <tbody id="vendas-tbody"></tbody>
+                    </table>
+                </div>
             </div>
         </div>
 
@@ -871,20 +878,24 @@
 
             <div class="card" style="margin-bottom:16px">
                 <div class="card-title">Desempenho por Produto</div>
-                <table class="cost-table">
-                    <thead><tr><th>Produto</th><th>Vendidas</th><th>Preço médio</th><th>Custo</th><th>Margem un.</th><th>Margem total</th><th>Custo %</th></tr></thead>
-                    <tbody id="produtos-tbody"></tbody>
-                </table>
+                <div class="tabela-rolavel">
+                    <table class="cost-table">
+                        <thead><tr><th>Produto</th><th>Vendidas</th><th>Preço médio</th><th>Custo</th><th>Margem un.</th><th>Margem total</th><th>Custo %</th></tr></thead>
+                        <tbody id="produtos-tbody"></tbody>
+                    </table>
+                </div>
             </div>
 
             <div class="card">
                 <div class="card-title">Consumo Teórico × Real</div>
                 <div style="margin-bottom:12px;font-size:12px;color:var(--muted)">O que as vendas pediam, contra o que a balança pesou. A diferença é dose exagerada, desperdício ou perda.</div>
                 <div id="variancia-resumo" style="margin-bottom:12px;font-weight:600"></div>
-                <table class="cost-table">
-                    <thead><tr><th>Insumo</th><th>Teórico</th><th>Real</th><th>Diferença</th><th>Variação</th><th>Custo</th><th>Leitura</th></tr></thead>
-                    <tbody id="variancia-tbody"></tbody>
-                </table>
+                <div class="tabela-rolavel">
+                    <table class="cost-table">
+                        <thead><tr><th>Insumo</th><th>Teórico</th><th>Real</th><th>Diferença</th><th>Variação</th><th>Custo</th><th>Leitura</th></tr></thead>
+                        <tbody id="variancia-tbody"></tbody>
+                    </table>
+                </div>
                 <div id="variancia-sem-baixa" style="margin-top:12px;font-size:12px;color:var(--orange)"></div>
                 <div style="margin-top:10px;font-size:12px;color:var(--muted)">Referência do setor: variação até 2% indica operação bem controlada; de 2% a 5% é o comum; acima disso vale investigar.</div>
             </div>
